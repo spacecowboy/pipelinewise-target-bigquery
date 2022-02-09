@@ -289,6 +289,7 @@ class DbSync:
             logger.error("Invalid configuration:\n   * {}".format('\n   * '.join(config_errors)))
             sys.exit(1)
 
+        self.table_prefix = self.connection_config.get('table_prefix', '')
         self.schema_name = None
         self.grantees = None
 
@@ -388,6 +389,9 @@ class DbSync:
 
         if is_temporary:
             table_name =  '{}_temp'.format(table_name)
+
+        if self.table_prefix:
+            table_name = f'{self.table_prefix}{table_name}'
 
         if without_schema:
             return '{}'.format(table_name)
