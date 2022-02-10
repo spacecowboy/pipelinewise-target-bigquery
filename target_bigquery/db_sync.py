@@ -388,15 +388,12 @@ class DbSync:
         table_name = re.sub(pattern, '_', stream_dict['table_name']).lower()
 
         if is_temporary:
-            table_name =  '{}_temp'.format(table_name)
+            table_name =  f'{table_name}_temp'
 
         if self.table_prefix:
             table_name = f'{self.table_prefix}{table_name}'
 
-        if without_schema:
-            return '{}'.format(table_name)
-        else:
-            return '{}.{}'.format(self.schema_name, table_name)
+        return table_name
 
     def record_primary_key_string(self, record):
         if len(self.stream_schema_message['key_properties']) == 0:
@@ -758,13 +755,12 @@ class DbSync:
         stream_schema_message = self.stream_schema_message
         stream = stream_schema_message['stream']
         table_name = self.table_name(stream, without_schema=True)
-        table_name_with_schema = self.table_name(stream)
         found_tables = [table for table in (self.get_tables()) if table['table_name'].lower() == table_name]
         if len(found_tables) == 0:
-            logger.info("Table '{}' does not exist. Creating...".format(table_name_with_schema))
+            logger.info("Table '{}' does not exist. Creating...".format(table_name))
             self.create_table()
 
             self.grant_privilege(self.schema_name, self.grantees, self.grant_select_on_all_tables_in_schema)
         else:
-            logger.info("Table '{}' exists".format(table_name_with_schema))
+            logger.info("Table '{}' exists".format(table_name))
             self.update_columns()
