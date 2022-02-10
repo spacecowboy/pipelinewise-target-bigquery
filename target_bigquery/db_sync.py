@@ -658,7 +658,7 @@ class DbSync:
 
         project_id = self.connection_config['project_id']
         dataset_id = self.schema_name
-        table_name = self.table_name(table_name, without_schema=True)
+        # table_name = self.table_name(table_name, without_schema=True)
 
         table_ref = client.dataset(dataset_id).table(table_name)
         table = client.get_table(table_ref)  # API request
