@@ -393,6 +393,10 @@ class DbSync:
         if self.table_prefix:
             table_name = f'{self.table_prefix}{table_name}'
 
+        if not without_schema:
+            # Prefix with dataset id for table creation and merges
+            table_name = f"{self.schema_name}.{table_name}"
+
         return table_name
 
     def record_primary_key_string(self, record):
@@ -519,7 +523,7 @@ class DbSync:
     def update_from_temp_table(self, temp_table):
         stream_schema_message = self.stream_schema_message
         columns = self.column_names()
-        table = self.table_name(stream_schema_message['stream'])
+        table = self.table_name(stream_schema_message['stream'], without_schema=False)
         table_without_schema = self.table_name(stream_schema_message['stream'], without_schema=True)
         temp_schema = self.connection_config.get('temp_schema', self.schema_name)
 
@@ -654,9 +658,7 @@ class DbSync:
 
     def get_table_columns(self, table_name):
         client = self.open_connection()
-        dataset_ref = client.dataset(self.schema_name)
 
-        project_id = self.connection_config['project_id']
         dataset_id = self.schema_name
         # table_name = self.table_name(table_name, without_schema=True)
 
@@ -755,9 +757,10 @@ class DbSync:
         stream_schema_message = self.stream_schema_message
         stream = stream_schema_message['stream']
         table_name = self.table_name(stream, without_schema=True)
+        table_name_with_schema = self.table_name(stream, without_schema=False)
         found_tables = [table for table in (self.get_tables()) if table['table_name'].lower() == table_name]
         if len(found_tables) == 0:
-            logger.info("Table '{}' does not exist. Creating...".format(table_name))
+            logger.info("Table '{}' does not exist. Creating...".format(table_name_with_schema))
             self.create_table()
 
             self.grant_privilege(self.schema_name, self.grantees, self.grant_select_on_all_tables_in_schema)
