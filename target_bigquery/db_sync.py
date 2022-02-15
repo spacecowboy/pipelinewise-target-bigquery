@@ -243,7 +243,6 @@ def fix_datetimes(data, schema):
     """
     Recursively walks the object to find datetimes
     """
-    logger.info(f"JONAS {data} | {schema}")
     result = {}
     for unsafe_name, props in schema.items():
         name = safe_column_name(unsafe_name, quotes=False)
@@ -466,7 +465,6 @@ class DbSync:
             flatten = flatten_record(record, max_level=self.data_flattening_max_level)
             result = {}
             for name, props in self.flatten_schema.items():
-                logger.info(f"JONAS flatten schema {name}: {props}")
                 if name in flatten:
                     if is_unstructured_object(props):
                         result[name] = json.dumps(flatten[name])
