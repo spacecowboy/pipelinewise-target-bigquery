@@ -10,6 +10,7 @@ import sys
 
 from tempfile import NamedTemporaryFile, mkstemp
 from fastavro import writer, parse_schema
+from fastavro.validation import validate_many
 from joblib import Parallel, delayed, parallel_backend
 from jsonschema import Draft7Validator, FormatChecker
 from singer import get_logger
@@ -315,7 +316,9 @@ def flush_records(stream, records_to_load, row_count, db_sync):
     csv_fd, csv_file = mkstemp()
     LOGGER.info(f"JONAS temp file: {csv_file}")
     with open(csv_file, 'wb') as out:
-        writer(out, parsed_schema, db_sync.records_to_avro(records_to_load.values()))
+        records = records_to_load.values()
+        validate_many(db_sync.records_to_avro(records), parsed_schema)
+        writer(out, parsed_schema, db_sync.records_to_avro(records))
 
     # Seek to the beginning of the file and load
     with open(csv_file, 'r+b') as f:
