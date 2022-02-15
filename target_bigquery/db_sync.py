@@ -484,7 +484,11 @@ class DbSync:
                         if flatten[name] is None:
                             result[name] = None
                         else:
-                            n = Decimal(flatten[name])
+                            try:
+                                n = Decimal(flatten[name])
+                            except Exception as e:
+                                logger.error(f"JONAS errored on {name}: {flatten[name]}")
+                                raise e
                             # limit n to the range -MAX_NUM to MAX_NUM
                             result[name] = MAX_NUM if n > MAX_NUM else -MAX_NUM if n < -MAX_NUM else n.quantize(ALLOWED_DECIMALS)
                     elif 'date-time' == props.get('format', '') and 'string' in props.get('type', []):
