@@ -438,6 +438,7 @@ class DbSync:
     # TODO: improve performance
     def records_to_avro(self, records):
         for record in records:
+            logger.info(f"JONAS avro got {record}")
             flatten = flatten_record(record, max_level=self.data_flattening_max_level)
             result = {}
             for name, props in self.flatten_schema.items():
@@ -467,6 +468,7 @@ class DbSync:
                         result[name] = flatten[name] if name in flatten else ''
                 else:
                     result[name] = None
+            logger.info(f"JONAS avro yielding {result}")
             yield result
 
     def load_avro(self, f, count):
