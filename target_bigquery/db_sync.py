@@ -17,6 +17,8 @@ from google.cloud.bigquery import LoadJobConfig
 from google.cloud.bigquery.table import Table
 from google.api_core import exceptions
 
+from target_bigquery.stream_utils import parse_datetime
+
 logger = singer.get_logger()
 
 PRECISION = 38
@@ -237,6 +239,26 @@ def flatten_record(d, parent_key=[], sep='__', level=0, max_level=0):
     return dict(items)
 
 
+def fix_datetimes(data, schema):
+    """
+    Recursively walks the object to find datetimes
+    """
+    logger.info(f"JONAS {data} | {schema}")
+    result = {}
+    for unsafe_name, props in schema.items():
+        name = safe_column_name(unsafe_name, quotes=False)
+        if name in data:
+            if 'date-time' == props.get('format', '') and 'string' in props.get('type', []):
+                result[name] = parse_datetime(data[name])
+            elif 'object' == props.get('type', '') and 'properties' in props:
+                result[name] = fix_datetimes(data[name], props['properties'])
+            else:
+                result[name] = data[name]
+        else:
+            result[name] = None
+    return result
+
+
 def primary_column_names(stream_schema_message):
     return [safe_column_name(p) for p in stream_schema_message['key_properties']]
 
@@ -291,11 +313,12 @@ class DbSync:
         # Exit if config has errors
         if len(config_errors) > 0:
             logger.error("Invalid configuration:\n   * {}".format('\n   * '.join(config_errors)))
-            sys.exit(1)
+            raise Exception("Invalid configuration:\n   * {}".format('\n   * '.join(config_errors)))
 
         self.table_prefix = self.connection_config.get('table_prefix', '')
         self.schema_name = None
         self.grantees = None
+        self.data_flattening_max_level = 0
 
         # Init stream schema
         if self.stream_schema_message is not None:
@@ -442,6 +465,7 @@ class DbSync:
             flatten = flatten_record(record, max_level=self.data_flattening_max_level)
             result = {}
             for name, props in self.flatten_schema.items():
+                logger.info(f"JONAS flatten schema {name}: {props}")
                 if name in flatten:
                     if is_unstructured_object(props):
                         result[name] = json.dumps(flatten[name])
@@ -464,6 +488,10 @@ class DbSync:
                             n = Decimal(flatten[name])
                             # limit n to the range -MAX_NUM to MAX_NUM
                             result[name] = MAX_NUM if n > MAX_NUM else -MAX_NUM if n < -MAX_NUM else n.quantize(ALLOWED_DECIMALS)
+                    elif 'date-time' == props.get('format', '') and 'string' in props.get('type', []):
+                        result[name] = parse_datetime(flatten[name])
+                    elif 'object' == props.get('type', '') and 'properties' in props:
+                        result[name] = fix_datetimes(flatten[name], props['properties'])
                     else:
                         result[name] = flatten[name] if name in flatten else ''
                 else:

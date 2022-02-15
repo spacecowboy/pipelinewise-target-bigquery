@@ -1,6 +1,9 @@
 import unittest
 
 from target_bigquery import db_sync
+from fastavro import writer, parse_schema
+from tempfile import mkstemp
+from datetime import datetime
 
 
 class TestDBSync(unittest.TestCase):
@@ -307,3 +310,72 @@ class TestDBSync(unittest.TestCase):
                               "c_obj__nested_prop3__multi_nested_prop1": "multi_value_1",
                               "c_obj__nested_prop3__multi_nested_prop2": "multi_value_2"
                           })
+
+    def test_avro_bug(self):
+        """
+        ValueError: 
+        {'id': 18781434520, '
+        portalid': 4906120, 
+        'active': True, 
+        'createdat': '2022-01-25T14:05:03.185000Z', 
+        'lastupdated': '2022-02-11T16:08:47.332000Z', 
+        'ownerid': 41369194, 
+        'type': 'TASK', 
+        'timestamp': '2022-02-15T13:00:00.000000Z'} (type <class 'dict'>) 
+        do not match 
+        ['null', {'type': 'record', 'name': 'marketing333110.warehouse.pipelinewise.avro.engagement_properties', 'fields': [
+            {'name': 'id', 'type': ['null', 'long']}, 
+            {'name': 'portalid', 'type': ['null', 'long']},
+             {'name': 'active', 'type': ['null', 'boolean']}, 
+             {'name': 'createdat', 'type': ['null', {'logicalType': 'timestamp-millis', 'type': 'long'}]},
+              {'name': 'lastupdated', 'type': ['null', {'logicalType': 'timestamp-millis', 'type': 'long'}]}, 
+              {'name': 'ownerid', 'type': ['null', 'long']}, 
+              {'name': 'type', 'type': ['null', 'string']}, 
+              {'name': 'timestamp', 'type': ['null', {'logicalType': 'timestamp-millis', 'type': 'long'}]}]}]
+        """
+
+        """
+        {'type': 'SCHEMA', 'stream': 'engagements', 'schema': {'type': 'object', 'properties': {'engagement_id': {'type': 'integer'}, 'lastUpdated': {'type': ['null', 'string'], 'format': 'date-time'}, 'engagement': {'type': 'object', 'properties': {'id': {'type': 'integer'}, 'portalId': {'type': 'integer'}, 'active': {'type': 'boolean'}, 'createdAt': {'type': ['null', 'string'], 'format': 'date-time'}, 'lastUpdated': {'type': ['null', 'string'], 'format': 'date-time'}, 'ownerId': {'type': 'integer'}, 'type': {'type': 'string'}, 'timestamp': {'type': ['null', 'string'], 'format': 'date-time'}}}, 'associations': {'type': ['null', 'object'], 'properties': {'contactIds': {'type': ['null', 'array'], 'items': {'type': 'integer'}}, 'companyIds': {'type': ['null', 'array'], 'items': {'type': 'integer'}}, 'dealIds': {'type': ['null', 'array'], 'items': {'type': 'integer'}}}}, 'attachments': {'type': ['null', 'array'], 'items': {'type': 'object', 'properties': {'id': {'type': 'integer'}}}}, 'metadata': {'type': ['null', 'object'], 'properties': {'body': {'type': ['null', 'string']}, 'from': {'type': ['null', 'object'], 'properties': {'email': {'type': 'string'}, 'firstName': {'type': 'string'}, 'lastName': {'type': 'string'}}}, 'to': {'type': ['null', 'array'], 'items': {'type': 'object', 'properties': {'email': {'type': 'string'}}}}, 'cc': {'type': ['null', 'array'], 'items': {'type': 'object', 'properties': {'email': {'type': 'string'}}}}, 'bcc': {'type': ['null', 'array'], 'items': {'type': 'object', 'properties': {'email': {'type': 'string'}}}}, 'subject': {'type': ['null', 'string']}, 'html': {'type': ['null', 'string']}, 'text': {'type': ['null', 'string']}, 'status': {'type': ['null', 'string']}, 'forObjectType': {'type': ['null', 'string']}, 'startTime': {'type': ['null', 'integer']}, 'endTime': {'type': ['null', 'integer']}, 'title': {'type': ['null', 'string']}, 'toNumber': {'type': ['null', 'string']}, 'fromNumber': {'type': ['null', 'string']}, 'externalId': {'type': ['null', 'string']}, 'durationMilliseconds': {'type': ['null', 'integer']}, 'externalAccountId': {'type': ['null', 'string']}, 'recordingUrl': {'type': ['null', 'string'], 'format': 'uri'}, 'disposition': {'type': ['null', 'string']}}}}}, 'key_properties': ['engagement_id'], 'bookmark_properties': ['lastUpdated']}
+        """
+
+        dbsync = db_sync.DbSync(
+            dict(
+                project_id='foo',
+                default_target_schema='bar'
+            ),
+                {
+                    'type': 'SCHEMA', 
+                    'stream': 'foobar', 
+                    'schema': {
+                        'type': 'object', 
+                        'properties': {
+                            'simplEid': {'type': 'integer'},
+                            'DT': {'type': ['null', 'string'], 'format': 'date-time'},
+                            'nestEdthing': {
+                                'type': 'object', 
+                                'properties': {
+                                    'extra': {'type': ['integer']},
+                                    'creAted': {'type': ['null', 'string'], 'format': 'date-time'}
+                                }
+                            }
+                        }
+                    }
+                }
+        )
+
+        parsed_schema = parse_schema(dbsync.avro_schema())
+
+        failing_record = {'simpleId': 55, 'dt': '2022-02-15T11:00:41.000000Z', 'nestedThing': {'Created': '2022-02-15T11:00:41.000000Z'}}
+        #failing_record = {'simpleId': 55, 'nestedThing': {'Created': datetime(2022, 2, 15, 11, 0, 41)}}
+    
+        csv_fd, csv_file = mkstemp()
+        with open(csv_file, 'wb') as out:
+            writer(out, parsed_schema, dbsync.records_to_avro([failing_record]))
+
+        #self.assertEqual(
+        #    db_sync.flatten_record(failing_record, max_level=0),
+        #    {'simpleid': 55, 'nestedthing': {'created': 1644919241000}}
+        #)
+
+
+        # records_to_avro

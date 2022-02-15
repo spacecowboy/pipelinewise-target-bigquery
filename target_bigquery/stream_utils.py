@@ -91,25 +91,26 @@ def add_metadata_values_to_record(record_message):
     """Populate metadata _sdc columns from incoming record message
     The location of the required attributes are fixed in the stream
     """
-    def parse_datetime(dt):
-        try:
-            # TODO: figure out why we can get _sdc_deleted_at as both datetime and string objects
-            if isinstance(dt, date):
-                return dt
-
-            if 'Z' in dt:
-                return datetime.strptime(dt, '%Y-%m-%dT%H:%M:%S.%fZ')
-
-            return datetime.fromisoformat('+'.join(dt.split('+')[:1]))
-        except TypeError:
-            return None
-
     extended_record = record_message['record']
     extended_record['_sdc_extracted_at'] = parse_datetime(record_message['time_extracted'])
     extended_record['_sdc_batched_at'] = datetime.now()
     extended_record['_sdc_deleted_at'] = parse_datetime(record_message.get('record', {}).get('_sdc_deleted_at'))
 
     return extended_record
+
+
+def parse_datetime(dt):
+    try:
+        # TODO: figure out why we can get _sdc_deleted_at as both datetime and string objects
+        if isinstance(dt, date):
+            return dt
+
+        if 'Z' in dt:
+            return datetime.strptime(dt, '%Y-%m-%dT%H:%M:%S.%fZ')
+
+        return datetime.fromisoformat('+'.join(dt.split('+')[:1]))
+    except TypeError:
+        return None
 
 
 def stream_name_to_dict(stream_name, separator='-'):
