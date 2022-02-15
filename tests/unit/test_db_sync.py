@@ -365,12 +365,19 @@ class TestDBSync(unittest.TestCase):
 
         parsed_schema = parse_schema(dbsync.avro_schema())
 
+        self.maxDiff = 10000
+
         failing_record = {'simpleId': 55, 'dt': '2022-02-15T11:00:41.000000Z', 'nestedThing': {'Created': '2022-02-15T11:00:41.000000Z'}}
         #failing_record = {'simpleId': 55, 'nestedThing': {'Created': datetime(2022, 2, 15, 11, 0, 41)}}
     
         csv_fd, csv_file = mkstemp()
         with open(csv_file, 'wb') as out:
             writer(out, parsed_schema, dbsync.records_to_avro([failing_record]))
+
+        print(csv_file)
+
+
+        self.assertEqual({}, parsed_schema)
 
         #self.assertEqual(
         #    db_sync.flatten_record(failing_record, max_level=0),
