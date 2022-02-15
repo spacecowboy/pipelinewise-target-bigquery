@@ -1,7 +1,7 @@
 import json
 import sys
 import singer
-import collections
+from collections.abc import MutableMapping
 import inflection
 import re
 import itertools
@@ -226,7 +226,7 @@ def flatten_record(d, parent_key=[], sep='__', level=0, max_level=0):
     for k, v in d.items():
         k = safe_column_name(k, quotes=False)
         new_key = flatten_key(k, parent_key, sep)
-        if isinstance(v, collections.MutableMapping) and level < max_level:
+        if isinstance(v, MutableMapping) and level < max_level:
             items.extend(flatten_record(v, parent_key + [k], sep=sep, level=level+1, max_level=max_level).items())
         else:
             items.append((new_key, v if type(v) is list or type(v) is dict else v))
