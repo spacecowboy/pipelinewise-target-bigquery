@@ -455,6 +455,7 @@ class DbSync:
             schema["alias"] = schema['name']
             schema["name"] = re.sub(pattern, "_", schema['name'])
 
+        logger.info(f"JONAS avro schema: {schema}")
         return schema
 
     # TODO: write tests for the json.dumps lines below and verify nesting

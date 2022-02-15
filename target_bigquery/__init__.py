@@ -313,6 +313,7 @@ def load_stream_batch(stream, records_to_load, row_count, db_sync, delete_rows=F
 def flush_records(stream, records_to_load, row_count, db_sync):
     parsed_schema = parse_schema(db_sync.avro_schema())
     csv_fd, csv_file = mkstemp()
+    LOGGER.info(f"JONAS temp file: {csv_file}")
     with open(csv_file, 'wb') as out:
         writer(out, parsed_schema, db_sync.records_to_avro(records_to_load.values()))
 
