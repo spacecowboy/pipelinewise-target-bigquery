@@ -481,7 +481,7 @@ class DbSync:
                     ):
                         result[name] = [json.dumps(value) for value in flatten[name]]
                     elif 'number' in props['type']:
-                        if flatten[name] is None:
+                        if flatten[name] is None or flatten[name] == '':
                             result[name] = None
                         else:
                             try:
