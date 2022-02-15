@@ -140,6 +140,8 @@ def column_type_avro(name, schema_property):
         result_type = {
             'type': 'int',
             'logicalType': 'time-millis'}
+    elif 'string' in property_type:
+        result_type = 'string'
     elif 'number' in property_type:
         result_type = {
             'type': 'bytes',
@@ -188,7 +190,9 @@ def flatten_key(k, parent_key, sep):
     return sep.join(inflected_key)
 
 
-def flatten_schema(d, parent_key=[], sep='__', level=0, max_level=0):
+def flatten_schema(d, parent_key=None, sep='__', level=0, max_level=0):
+    if parent_key is None:
+        parent_key = []
     items = []
 
     if 'properties' not in d:
@@ -223,7 +227,9 @@ def flatten_schema(d, parent_key=[], sep='__', level=0, max_level=0):
     return dict(sorted_items)
 
 
-def flatten_record(d, parent_key=[], sep='__', level=0, max_level=0):
+def flatten_record(d, parent_key=None, sep='__', level=0, max_level=0):
+    if parent_key is None:
+        parent_key = []
     items = []
     for k, v in d.items():
         k = safe_column_name(k, quotes=False)
@@ -239,23 +245,81 @@ def flatten_record(d, parent_key=[], sep='__', level=0, max_level=0):
     return dict(items)
 
 
-def fix_datetimes(data, schema):
+def fix_recursive_types_in_array(data, props):
     """
-    Recursively walks the object to find datetimes
+    Recursively walks the array to find datetimes and such
     """
+    if data is None:
+        return None
+
+    result = []
+    for d in data:
+        if d is not None:
+            # if 'date-time' == props.get('format', '') and 'string' in props.get('type', []):
+            #     result.append(parse_datetime(d))
+            # elif 'number' in props.get('type', []):
+            #     n = Decimal(d)
+            #     result.append(
+            #         MAX_NUM if n > MAX_NUM else -MAX_NUM if n < -MAX_NUM else n.quantize(ALLOWED_DECIMALS)
+            #     )
+            # elif 'object' in props.get('type', '') and 'properties' in props:
+            #     result.append(fix_recursive_types_in_dict(d, props['properties']))
+            # elif 'array' in props.get('type', []) and 'items' in props:
+            #     result.append(fix_recursive_types_in_array(d, props['items']))
+            # else:
+            #     result.append(d)
+            result.append(fix_recursive_inner(d, props))
+        else:
+            result.append(None)
+    return result
+
+
+def fix_recursive_types_in_dict(data, schema):
+    """
+    Recursively walks the object to find datetimes and such
+    """
+    if data is None:
+        return None
+    
     result = {}
     for unsafe_name, props in schema.items():
         name = safe_column_name(unsafe_name, quotes=False)
-        if name in data:
-            if 'date-time' == props.get('format', '') and 'string' in props.get('type', []):
-                result[name] = parse_datetime(data[name])
-            elif 'object' == props.get('type', '') and 'properties' in props:
-                result[name] = fix_datetimes(data[name], props['properties'])
-            else:
-                result[name] = data[name]
+        if name in data and data[name] is not None:
+            # if 'date-time' == props.get('format', '') and 'string' in props.get('type', []):
+            #     result[name] = parse_datetime(data[name])
+            # elif 'number' in props.get('type', []):
+            #     n = Decimal(data[name])
+            #     result[name] = MAX_NUM if n > MAX_NUM else -MAX_NUM if n < -MAX_NUM else n.quantize(ALLOWED_DECIMALS)
+            # elif 'object' in props.get('type', '') and 'properties' in props:
+            #     result[name] = fix_recursive_types_in_dict(data[name], props['properties'])
+            # elif 'array' in props.get('type', []) and 'items' in props:
+            #     result[name] = fix_recursive_types_in_array(data[name], props['items'])
+            # else:
+            #     result[name] = data[name]
+            result[name] = fix_recursive_inner(data[name], props)
         else:
             result[name] = None
     return result
+
+
+def fix_recursive_inner(value, props):
+    """
+    Recursively walks the item to find datetimes and such
+    """
+    if value is None:
+        return None
+
+    if 'date-time' == props.get('format', '') and 'string' in props.get('type', []):
+        return parse_datetime(value)
+    elif 'number' in props.get('type', []):
+        n = Decimal(value)
+        return MAX_NUM if n > MAX_NUM else -MAX_NUM if n < -MAX_NUM else n.quantize(ALLOWED_DECIMALS)
+    elif 'object' in props.get('type', '') and 'properties' in props:
+        return fix_recursive_types_in_dict(value, props['properties'])
+    elif 'array' in props.get('type', []) and 'items' in props:
+        return fix_recursive_types_in_array(value, props['items'])
+    else:
+        return value
 
 
 def primary_column_names(stream_schema_message):
@@ -379,7 +443,9 @@ class DbSync:
         location = self.connection_config.get('location', None)
         return bigquery.Client(project=project_id, location=location)
 
-    def query(self, query, params=[]):
+    def query(self, query, params=None):
+        if params is None:
+            params = []
         def to_query_parameter(value):
             if isinstance(value, int):
                 value_type = "INT64"
@@ -454,14 +520,12 @@ class DbSync:
             schema["alias"] = schema['name']
             schema["name"] = re.sub(pattern, "_", schema['name'])
 
-        logger.info(f"JONAS avro schema: {schema}")
         return schema
 
     # TODO: write tests for the json.dumps lines below and verify nesting
     # TODO: improve performance
     def records_to_avro(self, records):
         for record in records:
-            logger.info(f"JONAS avro got {record}")
             flatten = flatten_record(record, max_level=self.data_flattening_max_level)
             result = {}
             for name, props in self.flatten_schema.items():
@@ -484,22 +548,19 @@ class DbSync:
                         if flatten[name] is None or flatten[name] == '':
                             result[name] = None
                         else:
-                            try:
-                                n = Decimal(flatten[name])
-                            except Exception as e:
-                                logger.error(f"JONAS errored on {name}: {flatten[name]}")
-                                raise e
+                            n = Decimal(flatten[name])
                             # limit n to the range -MAX_NUM to MAX_NUM
                             result[name] = MAX_NUM if n > MAX_NUM else -MAX_NUM if n < -MAX_NUM else n.quantize(ALLOWED_DECIMALS)
                     elif 'date-time' == props.get('format', '') and 'string' in props.get('type', []):
                         result[name] = parse_datetime(flatten[name])
-                    elif 'object' == props.get('type', '') and 'properties' in props:
-                        result[name] = fix_datetimes(flatten[name], props['properties'])
+                    elif 'object' in props.get('type', '') and 'properties' in props:
+                        result[name] = fix_recursive_types_in_dict(flatten[name], props['properties'])
+                    elif 'array' in props.get('type', '') and 'items' in props:
+                        result[name] = fix_recursive_types_in_array(flatten[name], props['items'])
                     else:
-                        result[name] = flatten[name] if name in flatten else ''
+                        result[name] = flatten[name]
                 else:
                     result[name] = None
-            logger.info(f"JONAS avro yielding {result}")
             yield result
 
     def load_avro(self, f, count):
@@ -805,3 +866,18 @@ class DbSync:
         else:
             logger.info("Table '{}' exists".format(table_name))
             self.update_columns()
+
+
+# def is_type_decimal(types):
+#     """
+#     Example types:
+#         ['null', {'type': 'bytes', 'logicalType': 'decimal', 'scale': 9, 'precision': 38}]
+#     """
+#     # Could be a string and not a list too maybe
+#     for t in types:
+#         if not type(t) == dict:
+#             continue
+
+#         if t.get('logicalType', '') == 'decimal':
+#             return True
+#     return False

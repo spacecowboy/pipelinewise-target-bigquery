@@ -180,8 +180,6 @@ def persist_lines(config, lines) -> None:
 
             key_properties[stream] = o['key_properties']
 
-            LOGGER.info(f"JONAS schema: {o}")
-
             if config.get('add_metadata_columns') or config.get('hard_delete'):
                 stream_to_sync[stream] = DbSync(config, add_metadata_columns_to_schema(o))
             else:
@@ -314,7 +312,6 @@ def load_stream_batch(stream, records_to_load, row_count, db_sync, delete_rows=F
 def flush_records(stream, records_to_load, row_count, db_sync):
     parsed_schema = parse_schema(db_sync.avro_schema())
     csv_fd, csv_file = mkstemp()
-    LOGGER.info(f"JONAS temp file: {csv_file}")
     with open(csv_file, 'wb') as out:
         records = records_to_load.values()
         validate_many(db_sync.records_to_avro(records), parsed_schema)
