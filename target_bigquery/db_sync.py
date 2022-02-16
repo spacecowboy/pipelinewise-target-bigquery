@@ -28,6 +28,11 @@ getcontext().prec = PRECISION
 ALLOWED_DECIMALS = Decimal(10) ** Decimal(-SCALE)
 MAX_NUM = (Decimal(10) ** Decimal(PRECISION-SCALE)) - ALLOWED_DECIMALS
 
+
+global schema_collision_counter
+schema_collision_counter = 0
+
+
 def validate_config(config):
     errors = []
     required_config_keys = [
@@ -107,6 +112,7 @@ def column_type(name, schema_property):
 
 
 def column_type_avro(name, schema_property):
+    global schema_collision_counter
     property_type = schema_property['type']
     property_format = schema_property.get('format', None)
     result = {"name": safe_column_name(name, quotes=False)}
@@ -125,9 +131,12 @@ def column_type_avro(name, schema_property):
             for col, schema_property in schema_property.get('properties', {}).items()]
 
         if items_types:
+            # Avro tries to be smart and reuse schemas or something, this causes collisions when
+            # different schemas end up having the same name. So ensure that doesn't happen
+            schema_collision_counter += 1
             result_type = {
                 'type': 'record',
-                'name': name + '_properties',
+                'name': f'{name}_{schema_collision_counter}_properties',
                 'fields': items_types}
         else:
             result_type = 'string'
@@ -252,26 +261,10 @@ def fix_recursive_types_in_array(data, props):
     if data is None:
         return None
 
-    result = []
-    for d in data:
-        if d is not None:
-            # if 'date-time' == props.get('format', '') and 'string' in props.get('type', []):
-            #     result.append(parse_datetime(d))
-            # elif 'number' in props.get('type', []):
-            #     n = Decimal(d)
-            #     result.append(
-            #         MAX_NUM if n > MAX_NUM else -MAX_NUM if n < -MAX_NUM else n.quantize(ALLOWED_DECIMALS)
-            #     )
-            # elif 'object' in props.get('type', '') and 'properties' in props:
-            #     result.append(fix_recursive_types_in_dict(d, props['properties']))
-            # elif 'array' in props.get('type', []) and 'items' in props:
-            #     result.append(fix_recursive_types_in_array(d, props['items']))
-            # else:
-            #     result.append(d)
-            result.append(fix_recursive_inner(d, props))
-        else:
-            result.append(None)
-    return result
+    return [
+        fix_recursive_inner(datum, props) if datum is not None else None
+        for datum in data
+    ]
 
 
 def fix_recursive_types_in_dict(data, schema):
@@ -280,22 +273,11 @@ def fix_recursive_types_in_dict(data, schema):
     """
     if data is None:
         return None
-    
+
     result = {}
     for unsafe_name, props in schema.items():
         name = safe_column_name(unsafe_name, quotes=False)
         if name in data and data[name] is not None:
-            # if 'date-time' == props.get('format', '') and 'string' in props.get('type', []):
-            #     result[name] = parse_datetime(data[name])
-            # elif 'number' in props.get('type', []):
-            #     n = Decimal(data[name])
-            #     result[name] = MAX_NUM if n > MAX_NUM else -MAX_NUM if n < -MAX_NUM else n.quantize(ALLOWED_DECIMALS)
-            # elif 'object' in props.get('type', '') and 'properties' in props:
-            #     result[name] = fix_recursive_types_in_dict(data[name], props['properties'])
-            # elif 'array' in props.get('type', []) and 'items' in props:
-            #     result[name] = fix_recursive_types_in_array(data[name], props['items'])
-            # else:
-            #     result[name] = data[name]
             result[name] = fix_recursive_inner(data[name], props)
         else:
             result[name] = None
@@ -309,7 +291,15 @@ def fix_recursive_inner(value, props):
     if value is None:
         return None
 
-    if 'date-time' == props.get('format', '') and 'string' in props.get('type', []):
+    if is_unstructured_object(props):
+        return json.dumps(value)
+    # dump to string if array without items or recursive
+    elif ('array' in props['type'] and
+            ('items' not in props
+            or '$ref' in props['items']
+            or 'type' not in props['items'])):
+        return json.dumps(value)
+    elif 'date-time' == props.get('format', '') and 'string' in props.get('type', []):
         return parse_datetime(value)
     elif 'number' in props.get('type', []):
         n = Decimal(value)
@@ -527,40 +517,41 @@ class DbSync:
     def records_to_avro(self, records):
         for record in records:
             flatten = flatten_record(record, max_level=self.data_flattening_max_level)
-            result = {}
-            for name, props in self.flatten_schema.items():
-                if name in flatten:
-                    if is_unstructured_object(props):
-                        result[name] = json.dumps(flatten[name])
-                    # dump to string if array without items or recursive
-                    elif ('array' in props['type'] and
-                          ('items' not in props
-                           or '$ref' in props['items']
-                           or 'type' not in props['items'])):
-                        result[name] = json.dumps(flatten[name])
-                    # dump array elements to strings
-                    elif (
-                        'array' in props['type'] and
-                        is_unstructured_object(props.get('items', {}))
-                    ):
-                        result[name] = [json.dumps(value) for value in flatten[name]]
-                    elif 'number' in props['type']:
-                        if flatten[name] is None or flatten[name] == '':
-                            result[name] = None
-                        else:
-                            n = Decimal(flatten[name])
-                            # limit n to the range -MAX_NUM to MAX_NUM
-                            result[name] = MAX_NUM if n > MAX_NUM else -MAX_NUM if n < -MAX_NUM else n.quantize(ALLOWED_DECIMALS)
-                    elif 'date-time' == props.get('format', '') and 'string' in props.get('type', []):
-                        result[name] = parse_datetime(flatten[name])
-                    elif 'object' in props.get('type', '') and 'properties' in props:
-                        result[name] = fix_recursive_types_in_dict(flatten[name], props['properties'])
-                    elif 'array' in props.get('type', '') and 'items' in props:
-                        result[name] = fix_recursive_types_in_array(flatten[name], props['items'])
-                    else:
-                        result[name] = flatten[name]
-                else:
-                    result[name] = None
+            result = fix_recursive_types_in_dict(flatten, self.flatten_schema)
+            # result = {}
+            # for name, props in self.flatten_schema.items():
+            #     if name in flatten:
+            #         if is_unstructured_object(props):
+            #             result[name] = json.dumps(flatten[name])
+            #         # dump to string if array without items or recursive
+            #         elif ('array' in props['type'] and
+            #               ('items' not in props
+            #                or '$ref' in props['items']
+            #                or 'type' not in props['items'])):
+            #             result[name] = json.dumps(flatten[name])
+            #         # dump array elements to strings
+            #         elif (
+            #             'array' in props['type'] and
+            #             is_unstructured_object(props.get('items', {}))
+            #         ):
+            #             result[name] = [json.dumps(value) for value in flatten[name]]
+            #         elif 'number' in props['type']:
+            #             if flatten[name] is None or flatten[name] == '':
+            #                 result[name] = None
+            #             else:
+            #                 n = Decimal(flatten[name])
+            #                 # limit n to the range -MAX_NUM to MAX_NUM
+            #                 result[name] = MAX_NUM if n > MAX_NUM else -MAX_NUM if n < -MAX_NUM else n.quantize(ALLOWED_DECIMALS)
+            #         elif 'date-time' == props.get('format', '') and 'string' in props.get('type', []):
+            #             result[name] = parse_datetime(flatten[name])
+            #         elif 'object' in props.get('type', '') and 'properties' in props:
+            #             result[name] = fix_recursive_types_in_dict(flatten[name], props['properties'])
+            #         elif 'array' in props.get('type', '') and 'items' in props:
+            #             result[name] = fix_recursive_types_in_array(flatten[name], props['items'])
+            #         else:
+            #             result[name] = flatten[name]
+            #     else:
+            #         result[name] = None
             yield result
 
     def load_avro(self, f, count):
